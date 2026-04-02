@@ -1,14 +1,14 @@
 #!/usr/bin/env python3
 """
 联通招标信息抓取 - 双模式（API拦截优先 + DOM降级）
-模式1: 拦截getAnnoList API响应获取结构化数据
-模式2: 点击「今天」筛选后读取DOM卡片列表（API失败时降级）
+优化点：增强重试机制、指数退避、更长超时、多种等待策略
 """
 
 import json
 import os
 import sys
 import time
+import random
 from datetime import datetime, timezone, timedelta
 from playwright.sync_api import sync_playwright
 
@@ -21,21 +21,81 @@ TODAY = os.environ.get("BIDDING_DATE") or datetime.now(BJT).strftime("%Y-%m-%d")
 
 UNICOM_URL = "https://www.chinaunicombidding.cn/bidInformation"
 
+# 增强配置
+MAX_PAGE_RETRIES = 5          # 页面加载重试次数（从3增加到5）
+PAGE_TIMEOUT = 90000          # 页面超时时间（从60秒增加到90秒）
+API_WAIT_TIME = 10            # API拦截等待时间（从8秒增加到10秒）
+BACKOFF_BASE = 3              # 指数退避基数（重试间隔：3, 6, 12, 24, 48秒）
+
+def rand_sleep(lo=2, hi=5):
+    """随机延迟，避免固定模式"""
+    time.sleep(random.uniform(lo, hi))
 
 def construct_unicom_url(record):
     """用API/DOM数据构造联通真实详情URL"""
-    # 联通API返回的是id字段，直接用它
     rid = str(record.get('id', ''))
-    
     if not rid or rid == 'None':
         return UNICOM_URL
-    
-    # 联通详情页URL格式（已验证正确）
     return f"{UNICOM_URL}/detail?id={rid}"
 
 
+def wait_for_page_stable(page, timeout_ms=10000):
+    """等待页面网络稳定（避免还在加载时被误判为失败）"""
+    try:
+        page.wait_for_load_state("networkidle", timeout=timeout_ms)
+        return True
+    except:
+        return False
+
+
+def load_page_with_retry(page, url, wait_strategy="networkidle"):
+    """
+    带增强重试的页面加载
+    - 指数退避重试
+    - 多种等待策略
+    - 网络稳定检测
+    """
+    last_error = None
+    
+    for attempt in range(MAX_PAGE_RETRIES):
+        try:
+            print(f"  尝试加载页面 (第{attempt+1}/{MAX_PAGE_RETRIES}次)...")
+            
+            # 使用不同的等待策略
+            if attempt == 0:
+                wait_state = wait_strategy
+            elif attempt == 1:
+                wait_state = "domcontentloaded"  # 第二次尝试更快返回
+            else:
+                wait_state = "load"  # 后续尝试标准加载
+            
+            page.goto(url, wait_until=wait_state, timeout=PAGE_TIMEOUT)
+            
+            # 额外等待网络稳定
+            if wait_for_page_stable(page, 5000):
+                print(f"  页面加载成功（网络稳定）")
+            else:
+                print(f"  页面加载成功（继续执行）")
+            
+            return True
+            
+        except Exception as e:
+            last_error = str(e)
+            print(f"  页面加载异常: {e}")
+            
+            if attempt < MAX_PAGE_RETRIES - 1:
+                # 指数退避：3, 6, 12, 24, 48秒
+                sleep_time = BACKOFF_BASE * (2 ** attempt)
+                sleep_time += random.uniform(0, 2)  # 添加随机抖动
+                print(f"  等待{sleep_time:.1f}秒后重试...")
+                time.sleep(sleep_time)
+    
+    print(f"  页面加载失败（已重试{MAX_PAGE_RETRIES}次）: {last_error}")
+    return False
+
+
 def mode_api(page):
-    """模式1: API拦截抓取"""
+    """模式1: API拦截抓取（增强版）"""
     api_data = []
     all_records = []
     seen_ids = set()
@@ -53,25 +113,22 @@ def mode_api(page):
 
     page.on("response", on_response)
 
-    # 加载页面（带重试）
-    max_retries = 3
-    for attempt in range(max_retries):
-        try:
-            print(f"  尝试加载页面 (第{attempt+1}/{max_retries}次)...")
-            page.goto(UNICOM_URL, wait_until="load", timeout=60000)
-            time.sleep(8)
-            if api_data:
-                break
-            print(f"  未拦截到数据，等待2秒后重试...")
-            time.sleep(2)
-        except Exception as e:
-            print(f"  页面加载异常: {e}")
-            if attempt < max_retries - 1:
-                time.sleep(5)
+    # 增强页面加载
+    if not load_page_with_retry(page, UNICOM_URL, "networkidle"):
+        page.remove_listener("response", on_response)
+        return None
+
+    # 等待API数据（带重试）
+    api_wait_attempts = 3
+    for attempt in range(api_wait_attempts):
+        time.sleep(API_WAIT_TIME if attempt == 0 else 5)
+        if api_data:
+            break
+        print(f"  未拦截到数据，额外等待...")
 
     if not api_data:
         page.remove_listener("response", on_response)
-        return None  # API失败，触发降级
+        return None
 
     # 首页数据
     data = api_data[-1]
@@ -82,7 +139,7 @@ def mode_api(page):
     print(f"  总记录: {total}, 总页数: {pages}")
     print(f"  第1页: {len(records)} 条")
 
-    # 翻页 - 增加到50页以确保抓取完整
+    # 翻页
     max_pages = min(50, pages)
     no_today_streak = 0
     print(f"  将翻页检查: 最多{max_pages}页 (总页数{pages})")
@@ -93,7 +150,7 @@ def mode_api(page):
             next_btn = page.locator(f".ant-pagination-item[title='{p}']").first
             if next_btn.count() > 0:
                 next_btn.click()
-                time.sleep(3)
+                rand_sleep(3, 5)  # 随机延迟
                 if api_data:
                     records = api_data[-1].get('records', [])
                     all_records.extend(records)
@@ -108,7 +165,8 @@ def mode_api(page):
                             break
             else:
                 break
-        except:
+        except Exception as e:
+            print(f"  翻页异常: {e}")
             break
 
     page.remove_listener("response", on_response)
@@ -131,8 +189,6 @@ def mode_api(page):
             continue
         today_count += 1
 
-
-        # 关键词过滤
         if KEYWORDS and not any(kw in title for kw in KEYWORDS):
             continue
         
@@ -152,48 +208,6 @@ def mode_api(page):
     return {"results": results, "today_count": today_count, "mode": "API"}
 
 
-def construct_unicom_dom_url(context, title):
-    """用新页面搜索标题并点击获取真实详情URL"""
-    detail_page = context.new_page()
-    try:
-        detail_page.goto(UNICOM_URL, wait_until="load", timeout=30000)
-        time.sleep(5)
-
-        # 关闭可能的弹窗
-        detail_page.evaluate('''() => {
-            document.querySelectorAll(".ant-modal-wrap, .ant-modal-mask, .el-dialog__wrapper").forEach(el => {
-                el.style.display = "none";
-            });
-        }''')
-
-        # 找到搜索框并输入标题
-        search_input = detail_page.query_selector('input[placeholder*="搜索"], input[placeholder*="关键"]')
-        if search_input:
-            search_input.fill(title[:30])
-            time.sleep(1)
-            search_input.press("Enter")
-            time.sleep(4)
-
-        # 点击第一条结果卡片
-        first_item = detail_page.query_selector('.ant-list-item, .ant-card, .el-table__row, .infoItem')
-        if not first_item:
-            # 尝试更通用的选择器
-            first_item = detail_page.locator('text=' + title[:20]).first
-        if first_item:
-            first_item.click(force=True)
-            time.sleep(3)
-            url = detail_page.url
-            if 'detail' in url and url != UNICOM_URL:
-                print(f"      → 详情URL: {url[:80]}...")
-                return url
-    except Exception as e:
-        print(f"      → 获取联通详情URL失败: {e}")
-    finally:
-        detail_page.close()
-
-    return UNICOM_URL
-
-
 def mode_dom(page, context):
     """模式2: DOM模式——在浏览器JS环境中直接fetch调用API获取数据"""
     results = []
@@ -202,13 +216,9 @@ def mode_dom(page, context):
     page_no = 1
     max_pages = 10
 
-    try:
-        if "bidInformation" not in page.url:
-            page.goto(UNICOM_URL, wait_until="load", timeout=60000)
-            time.sleep(10)  # 等待JS初始化
-    except:
-        page.goto(UNICOM_URL, wait_until="load", timeout=60000)
-        time.sleep(10)
+    # 增强页面加载
+    if not load_page_with_retry(page, UNICOM_URL, "networkidle"):
+        return {"results": [], "today_count": 0, "mode": "DOM-失败"}
 
     print("  [模式2] 使用JS fetch调用API获取数据...")
 
@@ -271,7 +281,6 @@ def mode_dom(page, context):
 
             title = record.get('annoName', '')
             
-            # 关键词过滤
             if KEYWORDS and not any(kw in title for kw in KEYWORDS):
                 continue
 
@@ -279,7 +288,6 @@ def mode_dom(page, context):
             anno_type = record.get('annoType', '') or '公告'
             bid_company = record.get('bidCompany', '') or '中国联通'
 
-            # 使用统一函数构造URL
             detail_url = construct_unicom_url(record)
 
             print(f"  [✓] {province} | {anno_type} | {title[:50]}...")
@@ -296,17 +304,15 @@ def mode_dom(page, context):
 
         print(f"  第{page_no}页: {len(records)}条API记录, 今日{page_today}条匹配")
 
-        # 翻页条件：如果本页没有今天的数据且已经过了一半页数，停止
         if page_today == 0 and page_no > 3:
             break
 
-        # 检查是否还有更多页
         total_pages = api_data.get('pages', 1)
         if page_no >= total_pages:
             break
 
         page_no += 1
-        time.sleep(1)  # 翻页间隔
+        rand_sleep(1, 3)  # 随机延迟
 
     return {"results": results, "today_count": today_count, "mode": "JS-API"}
 
@@ -315,6 +321,7 @@ def fetch_unicom():
     print(f"=== 抓取联通招标 {datetime.now(BJT).strftime('%H:%M:%S')} ===")
     print(f"限定日期: {TODAY}")
     print(f"关键词: {' | '.join(KEYWORDS)}")
+    print(f"配置: 重试{MAX_PAGE_RETRIES}次, 超时{PAGE_TIMEOUT/1000:.0f}秒")
 
     errors = []
 
@@ -322,7 +329,7 @@ def fetch_unicom():
     browser = playwright.chromium.launch(headless=True)
     context = browser.new_context(
         viewport={"width": 1920, "height": 1080},
-        user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
+        user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36"
     )
     page = context.new_page()
 
@@ -342,6 +349,9 @@ def fetch_unicom():
     if data is None:
         try:
             print("\n[模式2] DOM页面抓取...")
+            # 关闭旧页面，新建页面避免状态问题
+            page.close()
+            page = context.new_page()
             data = mode_dom(page, context)
         except Exception as e:
             print(f"  DOM模式异常: {e}")
