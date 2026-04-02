@@ -1,0 +1,89 @@
+name: 运营商招标信息监控
+
+# 中国移动/联通/电信招标信息抓取 + 飞书推送
+# 关键词: 数智化、数据、算力、战略
+
+on:
+  # 定时运行：工作日 8:30-17:30 每30分钟运行一次
+  # UTC时间 = 北京时间 - 8小时
+  schedule:
+    - cron: '30 0-9 * * 1-5'   # 8:30-17:30 (UTC 0:30-9:30)
+  
+  # 支持手动触发
+  workflow_dispatch:
+    inputs:
+      bidding_date:
+        description: '指定日期 (格式: YYYY-MM-DD，留空使用今天)'
+        required: false
+        default: ''
+
+permissions:
+  contents: write
+
+jobs:
+  monitor:
+    runs-on: ubuntu-latest
+    env:
+      TZ: Asia/Shanghai
+    
+    steps:
+    - name: 检出代码
+      uses: actions/checkout@v4
+      with:
+        token: ${{ secrets.GITHUB_TOKEN }}
+    
+    - name: 设置Python环境
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.11'
+    
+    - name: 安装依赖
+      run: |
+        pip install -r requirements.txt
+        playwright install chromium
+    
+    - name: 恢复推送记录缓存
+      uses: actions/cache@v4
+      with:
+        path: pushed_bids_combined.json
+        key: pushed-bids-${{ github.run_id }}
+        restore-keys: |
+          pushed-bids-
+    
+    - name: 抓取移动招标信息
+      env:
+        BIDDING_DATE: ${{ github.event.inputs.bidding_date }}
+      run: python fetch_cmcc.py
+      continue-on-error: true
+    
+    - name: 抓取联通招标信息
+      env:
+        BIDDING_DATE: ${{ github.event.inputs.bidding_date }}
+      run: python fetch_unicom.py
+      continue-on-error: true
+    
+    - name: 抓取电信招标信息
+      env:
+        BIDDING_DATE: ${{ github.event.inputs.bidding_date }}
+      run: python fetch_telecom.py
+      continue-on-error: true
+    
+    - name: 整合推送到飞书
+      env:
+        FEISHU_WEBHOOK: ${{ secrets.FEISHU_WEBHOOK }}
+      run: python push_combined.py
+    
+    - name: 保存推送记录
+      uses: actions/cache@v4
+      with:
+        path: pushed_bids_combined.json
+        key: pushed-bids-${{ github.run_id }}
+    
+    - name: 提交去重记录到仓库（长期持久化）
+      run: |
+        git config user.name "github-actions[bot]"
+        git config user.email "github-actions[bot]@users.noreply.github.com"
+        git add pushed_bids_combined.json || true
+        git diff --staged --quiet || git commit -m "更新去重记录 $(date +'%Y-%m-%d %H:%M')"
+        git push || true
+      continue-on-error: true
