@@ -21,6 +21,8 @@ on:
 permissions:
   contents: write
 
+# GitHub Actions 默认不会并行运行同一 workflow，无需额外配置 concurrency
+
 jobs:
   monitor:
     runs-on: ubuntu-latest
