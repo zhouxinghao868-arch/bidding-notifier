@@ -11,6 +11,8 @@ build/
 # 数据文件（由脚本生成）
 *.json
 !package.json
+# 去重记录需要持久化
+!pushed_bids_combined.json
 
 # 日志
 *.log

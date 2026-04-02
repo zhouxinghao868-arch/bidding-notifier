@@ -47,7 +47,7 @@ jobs:
       uses: actions/cache@v4
       with:
         path: pushed_bids_combined.json
-        key: pushed-bids-${{ github.run_id }}
+        key: pushed-bids-main
         restore-keys: |
           pushed-bids-
     
@@ -74,11 +74,11 @@ jobs:
         FEISHU_WEBHOOK: ${{ secrets.FEISHU_WEBHOOK }}
       run: python push_combined.py
     
-    - name: 保存推送记录
+    - name: 保存推送记录缓存
       uses: actions/cache@v4
       with:
         path: pushed_bids_combined.json
-        key: pushed-bids-${{ github.run_id }}
+        key: pushed-bids-main
     
     - name: 提交去重记录到仓库（长期持久化）
       run: |
