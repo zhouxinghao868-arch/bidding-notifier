@@ -39,12 +39,25 @@ def scrape_table_deep(page, context, page_name, max_pages=50):
 
     while page_num <= max_pages:
         print(f"    第{page_num}页...", end=" ")
-        rand_sleep(2, 4)
+        rand_sleep(3, 5)  # 增加等待时间
 
-        rows = page.locator(".cmcc-table-row").all()
+        # 等待表格加载完成（带重试）
+        max_retries = 3
+        rows = []
+        for attempt in range(max_retries):
+            rows = page.locator(".cmcc-table-row").all()
+            if len(rows) > 0:
+                break
+            print(f"等待表格加载(重试{attempt+1})...", end=" ")
+            rand_sleep(2, 3)
         
         if len(rows) == 0:
-            print("无数据")
+            # 最后一次检查是否真的没有数据
+            page_content = page.content()
+            if "暂无数据" in page_content or "cmcc-empty" in page_content:
+                print("页面显示无数据")
+            else:
+                print("未找到表格数据（可能是JS未渲染）")
             break
 
         page_today = 0
@@ -155,8 +168,8 @@ def fetch_cmcc():
     print(f"{'='*60}")
 
     try:
-        page.goto("https://b2b.10086.cn/#/biddingProcurementBulletin", wait_until="load", timeout=90000)
-        rand_sleep(4, 7)
+        page.goto("https://b2b.10086.cn/#/biddingProcurementBulletin", wait_until="networkidle", timeout=90000)
+        rand_sleep(6, 10)  # 增加等待时间确保Vue渲染完成
         
         results, today_sub = scrape_table_deep(page, context, "招标采购公告", max_pages=50)
         all_results.extend(results)
@@ -172,8 +185,8 @@ def fetch_cmcc():
     print(f"{'='*60}")
 
     try:
-        page.goto("https://b2b.10086.cn/#/procurementServices", wait_until="load", timeout=90000)
-        rand_sleep(4, 7)
+        page.goto("https://b2b.10086.cn/#/procurementServices", wait_until="networkidle", timeout=90000)
+        rand_sleep(6, 10)  # 增加等待时间确保Vue渲染完成
         
         results, today_sub = scrape_table_deep(page, context, "采购服务", max_pages=50)
         all_results.extend(results)
