@@ -38,28 +38,34 @@ def save_pushed_records(records: Dict):
         json.dump(records, f, ensure_ascii=False)
 
 
-def get_bid_hash(title: str) -> str:
-    return hashlib.md5(title.strip()[:50].encode('utf-8')).hexdigest()
+def get_bid_hash(title: str, url: str = "") -> str:
+    """生成更可靠的去重哈希 - 结合标题完整内容+URL"""
+    content = f"{title.strip()}|{url.strip()}"
+    return hashlib.md5(content.encode('utf-8')).hexdigest()[:16]  # 取前16位足够
 
 
 def is_bid_pushed(title: str, url: str, records: Dict) -> bool:
-    bid_hash = get_bid_hash(title)
+    """检查是否已推送 - 使用标题+URL组合哈希"""
+    bid_hash = get_bid_hash(title, url)
+    # 检查哈希列表
     if bid_hash in records.get("hashes", []):
         return True
-    if url in records.get("urls", []):
+    # 同时检查URL列表（兜底）
+    if url and url in records.get("urls", []):
         return True
     return False
 
 
 def mark_bid_pushed(title: str, url: str, records: Dict):
-    bid_hash = get_bid_hash(title)
+    """标记为已推送"""
+    bid_hash = get_bid_hash(title, url)
     if "hashes" not in records:
         records["hashes"] = []
     if "urls" not in records:
         records["urls"] = []
     if bid_hash not in records["hashes"]:
         records["hashes"].append(bid_hash)
-    if url not in records["urls"]:
+    if url and url not in records["urls"]:
         records["urls"].append(url)
 
 
@@ -95,10 +101,17 @@ def send_combined_message(cmcc_bids: List[Dict], unicom_bids: List[Dict], teleco
     
     # 去重过滤
     records = load_pushed_records()
+    print(f"\n📋 已推送记录: {len(records.get('hashes', []))} 条哈希, {len(records.get('urls', []))} 条URL")
     
     cmcc_new = [b for b in cmcc_bids if not is_bid_pushed(b["title"], b["url"], records)]
     unicom_new = [b for b in unicom_bids if not is_bid_pushed(b["title"], b["url"], records)]
     telecom_new = [b for b in telecom_bids if not is_bid_pushed(b["title"], b["url"], records)]
+    
+    # 调试信息
+    print(f"\n🔍 去重检查:")
+    print(f"  移动: 原始{len(cmcc_bids)}条 → 新{len(cmcc_new)}条 (过滤{len(cmcc_bids)-len(cmcc_new)}条)")
+    print(f"  联通: 原始{len(unicom_bids)}条 → 新{len(unicom_new)}条 (过滤{len(unicom_bids)-len(unicom_new)}条)")
+    print(f"  电信: 原始{len(telecom_bids)}条 → 新{len(telecom_new)}条 (过滤{len(telecom_bids)-len(telecom_new)}条)")
     
     total = len(cmcc_new) + len(unicom_new) + len(telecom_new)
     
