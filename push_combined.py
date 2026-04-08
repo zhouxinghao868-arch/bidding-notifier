@@ -39,33 +39,34 @@ def save_pushed_records(records: Dict):
 
 
 def get_bid_hash(title: str, url: str = "") -> str:
-    """生成更可靠的去重哈希 - 结合标题完整内容+URL"""
-    content = f"{title.strip()}|{url.strip()}"
-    return hashlib.md5(content.encode('utf-8')).hexdigest()[:16]  # 取前16位足够
+    """生成去重哈希 - 只使用标题（避免URL变化导致重复推送）"""
+    # 只使用标题，不使用URL，因为移动抓取有时会获取不到URL（fallback到默认URL）
+    return hashlib.md5(title.strip().encode('utf-8')).hexdigest()[:16]
 
 
 def is_bid_pushed(title: str, url: str, records: Dict) -> bool:
-    """检查是否已推送 - 使用标题+URL组合哈希"""
-    bid_hash = get_bid_hash(title, url)
-    # 检查哈希列表
+    """检查是否已推送 - 使用标题哈希或URL匹配"""
+    bid_hash = get_bid_hash(title)
+    # 检查哈希列表（标题匹配）
     if bid_hash in records.get("hashes", []):
         return True
-    # 同时检查URL列表（兜底）
-    if url and url in records.get("urls", []):
+    # 同时检查URL列表（兜底，如果URL是有效的详情页URL）
+    if url and "detail" in url and url in records.get("urls", []):
         return True
     return False
 
 
 def mark_bid_pushed(title: str, url: str, records: Dict):
     """标记为已推送"""
-    bid_hash = get_bid_hash(title, url)
+    bid_hash = get_bid_hash(title)
     if "hashes" not in records:
         records["hashes"] = []
     if "urls" not in records:
         records["urls"] = []
     if bid_hash not in records["hashes"]:
         records["hashes"].append(bid_hash)
-    if url and url not in records["urls"]:
+    # 只记录有效的详情页URL
+    if url and "detail" in url and url not in records["urls"]:
         records["urls"].append(url)
 
 
