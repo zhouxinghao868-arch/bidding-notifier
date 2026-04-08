@@ -41,7 +41,8 @@ def save_pushed_records(records: Dict):
 def get_bid_hash(title: str, url: str = "") -> str:
     """生成去重哈希 - 只使用标题（避免URL变化导致重复推送）"""
     # 只使用标题，不使用URL，因为移动抓取有时会获取不到URL（fallback到默认URL）
-    return hashlib.md5(title.strip().encode('utf-8')).hexdigest()[:16]
+    # 使用完整32位MD5，与已保存的记录兼容
+    return hashlib.md5(title.strip().encode('utf-8')).hexdigest()
 
 
 def is_bid_pushed(title: str, url: str, records: Dict) -> bool:
