@@ -88,14 +88,21 @@ jobs:
         git config user.name "github-actions[bot]"
         git config user.email "github-actions[bot]@users.noreply.github.com"
         
-        # 检查文件是否有变化
-        if git diff --quiet HEAD -- pushed_bids_combined.json 2>/dev/null; then
+        # 先查看文件状态
+        echo "📋 检查 pushed_bids_combined.json 状态..."
+        ls -la pushed_bids_combined.json || echo "⚠️ 文件不存在"
+        
+        # 添加到git并检查状态
+        git add pushed_bids_combined.json
+        
+        # 检查是否有变更要提交
+        if git diff --cached --quiet; then
           echo "✅ pushed_bids_combined.json 没有变化，无需提交"
           exit 0
         fi
         
         echo "📝 检测到 pushed_bids_combined.json 有更新，准备提交..."
-        git add pushed_bids_combined.json
+        git diff --cached --stat
         git commit -m "更新去重记录 $(date +'%Y-%m-%d %H:%M')"
         git push
         echo "✅ 成功提交去重记录到仓库"
