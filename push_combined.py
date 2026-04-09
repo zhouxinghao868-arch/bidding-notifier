@@ -27,15 +27,22 @@ def load_pushed_records() -> Dict:
     if os.path.exists(PUSHED_RECORDS_FILE):
         try:
             with open(PUSHED_RECORDS_FILE, 'r', encoding='utf-8') as f:
-                return json.load(f)
-        except:
-            pass
+                records = json.load(f)
+                print(f"📂 已加载推送记录: {len(records.get('hashes', []))} 条哈希, {len(records.get('urls', []))} 条URL")
+                return records
+        except Exception as e:
+            print(f"⚠️ 读取推送记录失败: {e}")
+    print(f"📄 推送记录文件不存在或为空，创建新记录")
     return {"hashes": [], "urls": []}
 
 
 def save_pushed_records(records: Dict):
-    with open(PUSHED_RECORDS_FILE, 'w', encoding='utf-8') as f:
-        json.dump(records, f, ensure_ascii=False)
+    try:
+        with open(PUSHED_RECORDS_FILE, 'w', encoding='utf-8') as f:
+            json.dump(records, f, ensure_ascii=False)
+        print(f"💾 已保存推送记录: {len(records.get('hashes', []))} 条哈希, {len(records.get('urls', []))} 条URL")
+    except Exception as e:
+        print(f"❌ 保存推送记录失败: {e}")
 
 
 def get_bid_hash(title: str, url: str = "") -> str:

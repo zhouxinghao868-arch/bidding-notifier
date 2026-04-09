@@ -45,8 +45,9 @@ jobs:
         pip install -r requirements.txt
         playwright install chromium
     
-    - name: 恢复推送记录缓存
+    - name: 恢复推送记录缓存（仅当仓库中不存在时）
       uses: actions/cache@v4
+      if: ${{ !hashFiles('pushed_bids_combined.json') }}
       with:
         path: pushed_bids_combined.json
         key: pushed-bids-main
@@ -86,7 +87,16 @@ jobs:
       run: |
         git config user.name "github-actions[bot]"
         git config user.email "github-actions[bot]@users.noreply.github.com"
-        git add pushed_bids_combined.json || true
-        git diff --staged --quiet || git commit -m "更新去重记录 $(date +'%Y-%m-%d %H:%M')"
-        git push || true
+        
+        # 检查文件是否有变化
+        if git diff --quiet HEAD -- pushed_bids_combined.json 2>/dev/null; then
+          echo "✅ pushed_bids_combined.json 没有变化，无需提交"
+          exit 0
+        fi
+        
+        echo "📝 检测到 pushed_bids_combined.json 有更新，准备提交..."
+        git add pushed_bids_combined.json
+        git commit -m "更新去重记录 $(date +'%Y-%m-%d %H:%M')"
+        git push
+        echo "✅ 成功提交去重记录到仓库"
       continue-on-error: true
