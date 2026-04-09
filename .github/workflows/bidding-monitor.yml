@@ -77,25 +77,19 @@ jobs:
         FEISHU_WEBHOOK: ${{ secrets.FEISHU_WEBHOOK }}
       run: python push_combined.py
     
-    - name: 保存推送记录缓存
-      uses: actions/cache@v4
-      with:
-        path: pushed_bids_combined.json
-        key: pushed-bids-main
-    
-    - name: 提交去重记录到仓库（长期持久化）
+    - name: 提交去重记录到仓库
       run: |
         git config user.name "github-actions[bot]"
         git config user.email "github-actions[bot]@users.noreply.github.com"
         
-        # 先查看文件状态
+        # 查看文件状态
         echo "📋 检查 pushed_bids_combined.json 状态..."
         ls -la pushed_bids_combined.json || echo "⚠️ 文件不存在"
         
-        # 添加到git并检查状态
+        # 添加到git
         git add pushed_bids_combined.json
         
-        # 检查是否有变更要提交
+        # 检查是否有变更
         if git diff --cached --quiet; then
           echo "✅ pushed_bids_combined.json 没有变化，无需提交"
           exit 0
