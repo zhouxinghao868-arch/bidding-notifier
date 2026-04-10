@@ -45,14 +45,19 @@ jobs:
         pip install -r requirements.txt
         playwright install chromium
     
-    - name: 恢复推送记录缓存（仅当仓库中不存在时）
-      uses: actions/cache@v4
-      if: ${{ !hashFiles('pushed_bids_combined.json') }}
-      with:
-        path: pushed_bids_combined.json
-        key: pushed-bids-main
-        restore-keys: |
-          pushed-bids-
+    # 注意：已移除 actions/cache，避免覆盖 pushed_bids_combined.json
+    # 去重记录直接存储在仓库中，通过 git 提交保存
+    
+    - name: 确保推送记录文件存在
+      run: |
+        if [ ! -f pushed_bids_combined.json ]; then
+          echo '{"hashes": [], "urls": []}' > pushed_bids_combined.json
+          echo "✅ 创建空的推送记录文件"
+        else
+          echo "📂 推送记录文件已存在"
+          cat pushed_bids_combined.json | head -c 200
+          echo ""
+        fi
     
     - name: 抓取移动招标信息
       env:
