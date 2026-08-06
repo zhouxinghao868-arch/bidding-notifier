@@ -213,3 +213,4 @@ def fetch_cmcc():
 
 if __name__ == "__main__":
     fetch_cmcc()
+
